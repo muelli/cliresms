@@ -117,37 +117,65 @@ def main():
 	save_aliases()
 
 def read_config(file):
-	global username, password, carrier, split
+    global username, password, carrier, split
 
-	for line in map(lambda s: s.strip(), file.readlines()):
-	    log.debug('Parsing line:\n%s', line)
-	    if not line:    # We are handling an empty line
-	        continue
-	    if line.startswith('#'):
-	        continue
-	    elif 'username' in line:
-			username = line.split()[-1]
-			next
-	    elif 'password' in line:
-			password = line.split()[-1]
-			next
-	    elif 'carrier' in line:
-			carrier = line.split()[-1]
-			next
-	    elif 'nosplit' in line:
-			split = True
-			next
-	    elif 'alias' in line:
-		    try:
-		        # I think this matches a line like this:
-		        # alias friendone +12345
-			    matches = re.search(r'^\s*alias\s*([\w\.\-\_]*)\s*([\d\s\+]*)\s*$', line)
-			    aliases[matches.group(1)] = matches.group(2).split()
-		    except AttributeError:
-		        log.exception("Problem parsing line:\n%s", line)
-		        raise
-	    else:
-		    log.error('Could not parse line:\n%s', line)	    
+    for line in map(lambda s: s.strip(), file.readlines()):
+        log.debug('Parsing line:\n%s', line)
+        if not line:    # We are handling an empty line
+            continue
+        if line.startswith('#'):    # we also don't want to handle comments
+            continue
+        
+        # Now analyse the line's tokens
+        tokens = line.split()
+        head = tokens[0]
+        tail = tokens[1:]
+
+        if  head == 'username':
+    		username = tail[0].strip()
+			
+    	elif head == 'password':
+    	    password = tail[0].strip()
+			
+        elif head == 'carrier':
+            carrier = tail[0].strip()
+    		
+        elif head == 'nosplit':
+            split = True
+        
+        elif head == 'alias':
+            # Aliases are a bit more complex
+            alias = tail[0].strip()
+            names_or_numbers = tail[1:]
+            list_of_numbers = []
+            
+            for name_or_number in names_or_numbers:
+                # We separate actual phone numbers being defined
+                # from a group definition
+                if (name_or_number.startswith('+') and 
+                    name_or_number[1:].isdigit()):
+                    number = name_or_number
+                else:
+                    # It's not a number, so it's a name. So far, we 
+                    # require the name to be defined already
+                    try:
+                        number = aliases[name_or_number]
+                        log.debug('Looking for %s: %s', name_or_number, number)
+                    except KeyError:
+                        log.exception('Could not find %s, if you define '
+                            'aliases, you need to defined the referenced '
+                            'numbers first', name_or_number)
+                        log.info('So far, the known aliases are: %s', aliases)
+                        raise
+                    
+                
+                list_of_numbers.append(number)
+            
+            log.debug('Defining %s to be %s', alias, list_of_numbers)
+            aliases[alias] = list_of_numbers
+
+        else:
+            log.error('Could not parse line:\n%s', line)	    
 
 def get_message(message=None):
 	if not message:
