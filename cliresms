@@ -120,28 +120,34 @@ def read_config(file):
 	global username, password, carrier, split
 
 	for line in map(lambda s: s.strip(), file.readlines()):
+	    log.debug('Parsing line:\n%s', line)
+	    if not line:    # We are handling an empty line
+	        continue
 	    if line.startswith('#'):
 	        continue
-		if 'username' in line:
+	    elif 'username' in line:
 			username = line.split()[-1]
 			next
-		if 'password' in line:
+	    elif 'password' in line:
 			password = line.split()[-1]
 			next
-		if 'carrier' in line:
+	    elif 'carrier' in line:
 			carrier = line.split()[-1]
 			next
-		if 'nosplit' in line:
+	    elif 'nosplit' in line:
 			split = True
 			next
-		if 'alias' in line:
+	    elif 'alias' in line:
 		    try:
+		        # I think this matches a line like this:
+		        # alias friendone +12345
 			    matches = re.search(r'^\s*alias\s*([\w\.\-\_]*)\s*([\d\s\+]*)\s*$', line)
 			    aliases[matches.group(1)] = matches.group(2).split()
 		    except AttributeError:
 		        log.exception("Problem parsing line:\n%s", line)
 		        raise
-			    
+	    else:
+		    log.error('Could not parse line:\n%s', line)	    
 
 def get_message(message=None):
 	if not message:
