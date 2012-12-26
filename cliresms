@@ -96,10 +96,10 @@ def main():
 	if not split:
 		split = args.split_messages
 
-	message = get_message(args.message)
-
 	# Build a list of numbers from aliases
 	process_recipients(args.recipients)
+
+	message = get_message(args.message)
 
 	# Send SMS
 	try:
@@ -216,7 +216,11 @@ def process_recipients(arg_recipients):
 			if re.search(r'\+?\d', recipient):
 				recipients.append(recipient)
 			else:
-				print("Unknown alias: %s" % recipient)
+				log.error('Alias %s unknown', recipient)
+				log.error('Known aliases: %s',
+				    ' , '.join(sorted(aliases.keys(),
+				        key=lambda x: x.lower())))
+				raise ValueError("Unknown alias: %s" % recipient)
 
 def save_aliases():
 	if not conf_file: return
