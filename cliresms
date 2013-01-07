@@ -33,6 +33,9 @@ __cookie_file__ = os.path.join(os.path.expanduser("~"), '.cliresms.cookie')
 
 log = logging.getLogger()
 
+DEFAULT_USERAGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:17.0) Gecko/20100101 Firefox/17.0'
+
+
 username = None
 password = None
 split = None
@@ -312,19 +315,42 @@ def signal_handler(signum, frame):
 	sys.exit(0)
 
 class Account(object):
-	def __init__(self, username, password):
-		self.username = username
-		self.password = password
-		self.cj = cookiejar.MozillaCookieJar(__cookie_file__)
+    def __init__(self, username, password):
+	    self.username = username
+	    self.password = password
+	    self.cj = cookiejar.MozillaCookieJar(__cookie_file__)
+    
+	    opener = build_opener(HTTPCookieProcessor(self.cj))
+	    install_opener(opener)
+    
+    # A property for opening URLs to define what the HTTP library shall send
+    default_headers = {'User-Agent': DEFAULT_USERAGENT}
 
-		opener = build_opener(HTTPCookieProcessor(self.cj))
-		install_opener(opener)
+    def _urlopen(self, url_or_req, data=None, headers=None, *args, **kwargs):
+        # We don't seem to be able to add headers to a HTTP request unless
+        # we have a Request object
+        if isinstance(url_or_req, Request):
+            req = url_or_req
+        else:
+            req = Request(url_or_req)
 
-	def login(self, request=None):
-		print("Logging in...", end='')
-		sys.stdout.flush()
-		# Valid cookies found in cookie file, no need to login
-		if os.path.isfile(__cookie_file__):
+        if not headers:
+            headers = {}
+        default_headers = self.default_headers
+        # Copy the default into the final dict
+        final_headers = {k:default_headers[k] for k in default_headers}
+        # Then update with the given dict as .update() will overwrite
+        final_headers.update(headers)
+        log.debug('Opening %s with %s and headers: %s, %s, %s',
+            req.get_full_url(), data, final_headers, args, kwargs)
+        return urlopen(req, data, *args, **kwargs)
+    
+
+    def login(self, request=None):
+	    print("Logging in...", end='')
+	    sys.stdout.flush()
+	    # Valid cookies found in cookie file, no need to login
+	    if os.path.isfile(__cookie_file__):
 		    try:
 			    self.cj.load()
 		    except cookiejar.LoadError:
@@ -332,29 +358,29 @@ class Account(object):
 			        '%s', __cookie_file__)
 			    raise
 		    for c in self.cj:
-		    	if c.name in self.req_cookies.values():
-		    		print("(using existing session)", end=' ')
-		    		sys.stdout.flush()
-		    		return True
-
-		if request:
-			response = urlopen(request)
-		else:
-			data = urlencode(self.login_form_data).encode('utf-8')
-			response = urlopen(self.login_url, data)
-
-		if self.loggedin_url in response.geturl():
-			self.save_cookies()
-			return True
-
-	def save_cookies(self):
-		# Adjust session cookie so not discarded upon save and load
-		for c in self.cj:
-			if c.name == self.req_cookies['login']: login_cookie = c
-			if c.name == self.req_cookies['session']: session_cookie = c
-		session_cookie.discard = False
-		session_cookie.expires = login_cookie.expires
-		self.cj.save()
+		        if c.name in self.req_cookies.values():
+		    	    print("(using existing session)", end=' ')
+		    	    sys.stdout.flush()
+		    	    return True
+    
+	    if request:
+		    response = self._urlopen(request)
+	    else:
+		    data = urlencode(self.login_form_data).encode('utf-8')
+		    response = self._urlopen(self.login_url, data)
+    
+	    if self.loggedin_url in response.geturl():
+		    self.save_cookies()
+		    return True
+    
+    def save_cookies(self):
+	    # Adjust session cookie so not discarded upon save and load
+	    for c in self.cj:
+		    if c.name == self.req_cookies['login']: login_cookie = c
+		    if c.name == self.req_cookies['session']: session_cookie = c
+	    session_cookie.discard = False
+	    session_cookie.expires = login_cookie.expires
+	    self.cj.save()
 
 class MeteorAccount(Account):
 	def __init__(self, username, password):
@@ -376,7 +402,7 @@ class MeteorAccount(Account):
 		url = 'https://www.mymeteor.ie/go/freewebtext'
 		pat = r'Free web texts left <input type="text" id="numfreesmstext" value="(\d+)" disabled size=2>'
 
-		response = urlopen(url)
+		response = self._urlopen(url)
 		response_data = response.read().decode('utf-8')
 		match = re.search(pat, response_data)
 		log.debug('Texts remaining page:\n%s', response_data)
@@ -394,7 +420,7 @@ class MeteorAccount(Account):
 						'remove' : '-',
 						'add' : '0|' + recipient,}
 		params = urlencode(data)#.encode('utf-8')
-		urlopen(url + '?' + params)
+		self._urlopen(url + '?' + params)
 
 		# Add message
 		data = {'event' : 'smsAjax',
@@ -402,7 +428,7 @@ class MeteorAccount(Account):
 						'ajaxRequest' : 'sendSMS',
 						'messageText' : message,}
 		params = urlencode(data)#.encode('utf-8')
-		response = urlopen(url + '?' + params)
+		response = self._urlopen(url + '?' + params)
 		if re.search(pat, response.read().decode('utf-8')): return True
 
 class ThreeAccount(Account):
@@ -423,8 +449,10 @@ class ThreeAccount(Account):
 		url = self.loggedin_url
 		pat = r'Remaining texts: <\/span><br\/>(\d+) \(of \d+\)'
 
-		response = urlopen(url)
-		match = re.search(pat, response.read().decode('utf-8'))
+		response = self._urlopen(url)
+		response_data = response.read().decode('utf-8')
+		match = re.search(pat, response_data)
+		log.debug('Texts remaining page:\n%s', response_data)
 		self.texts_remaining = int(match.group(1) if match else -1)
 		return self.texts_remaining
 
@@ -435,7 +463,7 @@ class ThreeAccount(Account):
 						'data[Message][recipients_individual]' : recipient, }
 
 		data = urlencode(data).encode('utf-8')
-		response = urlopen(url, data)
+		response = self._urlopen(url, data)
 		if re.search(pat, response.read().decode('utf-8')):
 			return True
 
@@ -464,7 +492,7 @@ class O2Account(Account):
 		url = "http://messaging.o2online.ie/ssomanager.osp?APIID=AUTH-WEBSSO&TargetApp=o2om_smscenter_new.osp%3FMsgContentID%3D-1%26SID%3D_"
 		pat = r'o2om_smscenter_new.osp\?MsgContentID=-1&SID=_&SID=(\w+)'
 
-		response = urlopen(url)
+		response = self._urlopen(url)
 		match = re.search(pat, response.read().decode('utf-8'))
 		if match:
 			self.sid = match.group(1)
@@ -491,7 +519,7 @@ class O2Account(Account):
 		data = urlencode(data).encode('utf-8')
 		request = Request(url, data)
 		request.add_header('Referer', request.get_origin_req_host())
-		response = urlopen(request)
+		response = self._urlopen(request)
 		try:
 			content = self.parse_json(response.read().decode('utf-8'))
 		except ValueError:
@@ -508,7 +536,7 @@ class O2Account(Account):
 		data = urlencode(data).encode('utf-8')
 		request = Request(url, data)
 		request.add_header('Referer', request.get_origin_req_host())
-		response = urlopen(request)
+		response = self._urlopen(request)
 		content = self.parse_json(response.read().decode('utf-8'))
 		return content['isSuccess']
 
